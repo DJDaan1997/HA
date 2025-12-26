@@ -1,173 +1,220 @@
 blueprint:
-  name: Ultieme Badkamer Automatisering
-  description: Alles-in-één badkamer: licht, nachtstand, douche, ventilatie, scripts
+  name: Ultieme Badkamer Automatisering (stabiel)
+  description: >
+    Badkamer automatisering met:
+    - Aanwezigheidslicht (dag / avond / nacht)
+    - Nacht WC-stand
+    - Handmatige dimmer override
+    - Ventilatie op aanwezigheid (later uitbreidbaar)
+    - Alles aan/uit te schakelen
   domain: automation
 
   input:
     presence_sensor:
+      name: Aanwezigheidsmelder
       selector:
         entity:
           domain: binary_sensor
 
     light_target:
+      name: Badkamerlamp
       selector:
         entity:
           domain: light
 
     fan_switch:
+      name: Ventilatie
       selector:
         entity:
           domain: switch
 
-    humidity_sensor:
-      name: (Optioneel) Vocht sensor
-      default: []
-      selector:
-        entity:
-          domain: sensor
-
     auto_light:
+      name: Auto licht
       selector:
         entity:
           domain: input_boolean
+
     auto_fan:
+      name: Auto ventilatie
       selector:
         entity:
           domain: input_boolean
-    auto_douche:
-      selector:
-        entity:
-          domain: input_boolean
+
     auto_night_wc:
+      name: Nacht WC-stand
       selector:
         entity:
           domain: input_boolean
 
     manual_light:
-      selector:
-        entity:
-          domain: input_boolean
-    manual_fan:
+      name: Handmatige licht override
       selector:
         entity:
           domain: input_boolean
 
-    night_brightness:
-      default: 10
+    manual_fan:
+      name: Handmatige ventilatie override
+      selector:
+        entity:
+          domain: input_boolean
+
+    light_off_delay:
+      name: Licht uit na (min)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+
+    fan_on_delay:
+      name: Ventilatie aan na (min)
+      default: 3
       selector:
         number:
           min: 1
           max: 30
+          unit_of_measurement: min
 
-    day_brightness:
-      default: 100
-      selector:
-        number:
-          min: 1
-          max: 100
-
-    long_presence:
+    fan_run_on:
+      name: Ventilatie nalooptijd (min)
       default: 10
       selector:
         number:
-          min: 3
+          min: 1
           max: 60
-
-    night_start:
-      default: "23:00:00"
-      selector:
-        time:
+          unit_of_measurement: min
 
     day_start:
       default: "07:00:00"
       selector:
         time:
 
-    script_douche:
-      default: []
+    evening_start:
+      default: "18:00:00"
       selector:
-        entity:
-          domain: script
+        time:
 
-    script_long:
-      default: []
+    night_start:
+      default: "23:00:00"
       selector:
-        entity:
-          domain: script
+        time:
 
-    script_night:
-      default: []
+    brightness_day:
+      default: 100
       selector:
-        entity:
-          domain: script
+        number:
+          min: 1
+          max: 100
+
+    brightness_evening:
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    brightness_night:
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 50
 
 mode: restart
 
 trigger:
-  - platform: state
+  - id: presence_on
+    platform: state
     entity_id: !input presence_sensor
-  - platform: state
+    to: "on"
+
+  - id: presence_off
+    platform: state
+    entity_id: !input presence_sensor
+    to: "off"
+    for:
+      minutes: !input light_off_delay
+
+  - id: manual_dim
+    platform: state
     entity_id: !input light_target
     attribute: brightness
-  - platform: state
+
+  - id: fan_delay
+    platform: state
     entity_id: !input presence_sensor
     to: "on"
     for:
-      minutes: !input long_presence
+      minutes: !input fan_on_delay
 
 action:
   - choose:
 
-      # HANDMATIG LICHT
+      # ===== HANDMATIG DIMMEN → OVERRIDE =====
       - conditions:
           - condition: trigger
-            attribute: brightness
+            id: manual_dim
         sequence:
           - service: input_boolean.turn_on
             target:
               entity_id: !input manual_light
 
-      # NACHT WC
+      # ===== LICHT AAN BIJ AANWEZIGHEID =====
       - conditions:
-          - condition: time
-            after: !input night_start
-            before: !input day_start
-          - condition: state
-            entity_id: !input auto_night_wc
-            state: "on"
-          - condition: state
-            entity_id: !input presence_sensor
-            state: "on"
-        sequence:
-          - service: light.turn_on
-            target:
-              entity_id: !input light_target
-            data:
-              brightness_pct: !input night_brightness
-          - service: script.turn_on
-            target:
-              entity_id: !input script_night
-
-      # LANG AANWEZIG
-      - conditions:
-          - condition: state
-            entity_id: !input auto_douche
-            state: "on"
           - condition: trigger
-            to: "on"
-        sequence:
-          - service: switch.turn_on
-            target:
-              entity_id: !input fan_switch
-          - service: script.turn_on
-            target:
-              entity_id: !input script_long
-
-      # LICHT UIT
-      - conditions:
+            id: presence_on
           - condition: state
-            entity_id: !input presence_sensor
+            entity_id: !input auto_light
+            state: "on"
+          - condition: state
+            entity_id: !input manual_light
             state: "off"
+        sequence:
+          - choose:
+              # Nacht WC
+              - conditions:
+                  - condition: time
+                    after: !input night_start
+                    before: !input day_start
+                  - condition: state
+                    entity_id: !input auto_night_wc
+                    state: "on"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_night
+
+              # Overdag
+              - conditions:
+                  - condition: time
+                    after: !input day_start
+                    before: !input evening_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_day
+
+              # Avond
+              - conditions:
+                  - condition: time
+                    after: !input evening_start
+                    before: !input night_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_evening
+
+      # ===== LICHT UIT =====
+      - conditions:
+          - condition: trigger
+            id: presence_off
         sequence:
           - service: light.turn_off
             target:
@@ -175,3 +222,32 @@ action:
           - service: input_boolean.turn_off
             target:
               entity_id: !input manual_light
+
+      # ===== VENTILATIE AAN =====
+      - conditions:
+          - condition: trigger
+            id: fan_delay
+          - condition: state
+            entity_id: !input auto_fan
+            state: "on"
+          - condition: state
+            entity_id: !input manual_fan
+            state: "off"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input fan_switch
+
+      # ===== VENTILATIE UIT =====
+      - conditions:
+          - condition: trigger
+            id: presence_off
+          - condition: state
+            entity_id: !input auto_fan
+            state: "on"
+        sequence:
+          - delay:
+              minutes: !input fan_run_on
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
