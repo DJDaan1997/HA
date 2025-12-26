@@ -1,0 +1,185 @@
+blueprint:
+  name: Badkamer Licht – Aanwezigheid & Nachtstand
+  description: >
+    Badkamerverlichting met aanwezigheid,
+    tijd-afhankelijke helderheid,
+    nacht WC-stand en handmatige dimmer override.
+  domain: automation
+
+  input:
+    presence_sensor:
+      name: Aanwezigheidsmelder
+      selector:
+        entity:
+          domain: binary_sensor
+
+    light_target:
+      name: Badkamerlamp (dimmer)
+      selector:
+        entity:
+          domain: light
+
+    auto_light:
+      name: Automatisch licht aan/uit
+      selector:
+        entity:
+          domain: input_boolean
+
+    auto_night_wc:
+      name: Nacht WC-stand aan/uit
+      selector:
+        entity:
+          domain: input_boolean
+
+    manual_light:
+      name: Handmatige licht override
+      selector:
+        entity:
+          domain: input_boolean
+
+    light_off_delay:
+      name: Licht uit na (minuten)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+
+    day_start:
+      name: Start dag
+      default: "07:00:00"
+      selector:
+        time:
+
+    evening_start:
+      name: Start avond
+      default: "18:00:00"
+      selector:
+        time:
+
+    night_start:
+      name: Start nacht
+      default: "23:00:00"
+      selector:
+        time:
+
+    brightness_day:
+      name: Helderheid dag (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    brightness_evening:
+      name: Helderheid avond (%)
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    brightness_night:
+      name: Helderheid nacht (%)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 50
+
+mode: restart
+
+trigger:
+  - id: presence_on
+    platform: state
+    entity_id: !input presence_sensor
+    to: "on"
+
+  - id: presence_off
+    platform: state
+    entity_id: !input presence_sensor
+    to: "off"
+    for:
+      minutes: !input light_off_delay
+
+  - id: manual_dim
+    platform: state
+    entity_id: !input light_target
+    attribute: brightness
+
+action:
+  - choose:
+
+      # ===== HANDMATIG DIMMEN → OVERRIDE =====
+      - conditions:
+          - condition: trigger
+            id: manual_dim
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_light
+
+      # ===== LICHT AAN BIJ AANWEZIGHEID =====
+      - conditions:
+          - condition: trigger
+            id: presence_on
+          - condition: state
+            entity_id: !input auto_light
+            state: "on"
+          - condition: state
+            entity_id: !input manual_light
+            state: "off"
+        sequence:
+          - choose:
+
+              # 🌙 NACHT WC-STAND
+              - conditions:
+                  - condition: time
+                    after: !input night_start
+                    before: !input day_start
+                  - condition: state
+                    entity_id: !input auto_night_wc
+                    state: "on"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_night
+
+              # ☀️ DAG
+              - conditions:
+                  - condition: time
+                    after: !input day_start
+                    before: !input evening_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_day
+
+              # 🌆 AVOND
+              - conditions:
+                  - condition: time
+                    after: !input evening_start
+                    before: !input night_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_evening
+
+      # ===== LICHT UIT + RESET OVERRIDE =====
+      - conditions:
+          - condition: trigger
+            id: presence_off
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_target
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_light
