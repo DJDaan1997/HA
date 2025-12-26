@@ -1,0 +1,177 @@
+blueprint:
+  name: Ultieme Badkamer Automatisering
+  description: Alles-in-één badkamer: licht, nachtstand, douche, ventilatie, scripts
+  domain: automation
+
+  input:
+    presence_sensor:
+      selector:
+        entity:
+          domain: binary_sensor
+
+    light_target:
+      selector:
+        entity:
+          domain: light
+
+    fan_switch:
+      selector:
+        entity:
+          domain: switch
+
+    humidity_sensor:
+      name: (Optioneel) Vocht sensor
+      default: []
+      selector:
+        entity:
+          domain: sensor
+
+    auto_light:
+      selector:
+        entity:
+          domain: input_boolean
+    auto_fan:
+      selector:
+        entity:
+          domain: input_boolean
+    auto_douche:
+      selector:
+        entity:
+          domain: input_boolean
+    auto_night_wc:
+      selector:
+        entity:
+          domain: input_boolean
+
+    manual_light:
+      selector:
+        entity:
+          domain: input_boolean
+    manual_fan:
+      selector:
+        entity:
+          domain: input_boolean
+
+    night_brightness:
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 30
+
+    day_brightness:
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    long_presence:
+      default: 10
+      selector:
+        number:
+          min: 3
+          max: 60
+
+    night_start:
+      default: "23:00:00"
+      selector:
+        time:
+
+    day_start:
+      default: "07:00:00"
+      selector:
+        time:
+
+    script_douche:
+      default: []
+      selector:
+        entity:
+          domain: script
+
+    script_long:
+      default: []
+      selector:
+        entity:
+          domain: script
+
+    script_night:
+      default: []
+      selector:
+        entity:
+          domain: script
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input presence_sensor
+  - platform: state
+    entity_id: !input light_target
+    attribute: brightness
+  - platform: state
+    entity_id: !input presence_sensor
+    to: "on"
+    for:
+      minutes: !input long_presence
+
+action:
+  - choose:
+
+      # HANDMATIG LICHT
+      - conditions:
+          - condition: trigger
+            attribute: brightness
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_light
+
+      # NACHT WC
+      - conditions:
+          - condition: time
+            after: !input night_start
+            before: !input day_start
+          - condition: state
+            entity_id: !input auto_night_wc
+            state: "on"
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness_pct: !input night_brightness
+          - service: script.turn_on
+            target:
+              entity_id: !input script_night
+
+      # LANG AANWEZIG
+      - conditions:
+          - condition: state
+            entity_id: !input auto_douche
+            state: "on"
+          - condition: trigger
+            to: "on"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input fan_switch
+          - service: script.turn_on
+            target:
+              entity_id: !input script_long
+
+      # LICHT UIT
+      - conditions:
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "off"
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_target
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_light
