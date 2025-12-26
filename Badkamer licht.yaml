@@ -1,9 +1,10 @@
 blueprint:
-  name: Badkamer Licht – Aanwezigheid & Nachtstand
+  name: Badkamer Licht – Ultiem & Correct
   description: >
-    Badkamerverlichting met aanwezigheid,
-    tijd-afhankelijke helderheid,
+    Badkamerlicht met aanwezigheid, dag/avond/nacht helderheid,
     nacht WC-stand en handmatige dimmer override.
+    Handmatige override wordt alleen geactiveerd bij echte dimmeractie.
+    Licht gaat uit na X minuten, override reset automatisch.
   domain: automation
 
   input:
@@ -91,11 +92,13 @@ blueprint:
 mode: restart
 
 trigger:
+  # Aanwezigheid aan
   - id: presence_on
     platform: state
     entity_id: !input presence_sensor
     to: "on"
 
+  # Aanwezigheid uit na X minuten
   - id: presence_off
     platform: state
     entity_id: !input presence_sensor
@@ -103,6 +106,7 @@ trigger:
     for:
       minutes: !input light_off_delay
 
+  # Dimmer handmatig aangepast
   - id: manual_dim
     platform: state
     entity_id: !input light_target
@@ -115,6 +119,9 @@ action:
       - conditions:
           - condition: trigger
             id: manual_dim
+          - condition: state
+            entity_id: !input manual_light
+            state: "off"  # Alleen aanzetten als nog niet handmatig
         sequence:
           - service: input_boolean.turn_on
             target:
