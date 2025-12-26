@@ -1,0 +1,227 @@
+blueprint:
+  name: Badkamer – Aanwezigheid, dimmer override & ventilatie
+  description: >
+    Badkamerautomatisering met:
+    - Tijd-afhankelijke dimstand
+    - Handmatige override via draaiknop
+    - Ventilatie op verblijfsduur
+    - Handmatige override ventilatie
+  domain: automation
+
+  input:
+    presence_sensor:
+      name: Aanwezigheidsmelder
+      selector:
+        entity:
+          domain: binary_sensor
+
+    light_target:
+      name: Badkamerlamp (ION dimmer)
+      selector:
+        entity:
+          domain: light
+
+    manual_light_override:
+      name: Handmatige override licht
+      selector:
+        entity:
+          domain: input_boolean
+
+    manual_fan_override:
+      name: Handmatige override ventilatie
+      selector:
+        entity:
+          domain: input_boolean
+
+    fan_switch:
+      name: Ventilatie schakelaar
+      selector:
+        entity:
+          domain: switch
+
+    off_delay:
+      name: Licht uit na (minuten)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+
+    fan_presence_delay:
+      name: Ventilatie aan na aanwezigheid (minuten)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: min
+
+    fan_run_on:
+      name: Ventilatie nalooptijd (minuten)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+
+    day_start:
+      default: "07:00:00"
+      selector:
+        time:
+
+    evening_start:
+      default: "18:00:00"
+      selector:
+        time:
+
+    night_start:
+      default: "23:00:00"
+      selector:
+        time:
+
+    brightness_day:
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    brightness_evening:
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+
+    brightness_night:
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 100
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input presence_sensor
+    to: "on"
+
+  - platform: state
+    entity_id: !input presence_sensor
+    to: "off"
+    for:
+      minutes: !input off_delay
+
+  # Handmatige dimmer bediening
+  - platform: state
+    entity_id: !input light_target
+    attribute: brightness
+
+  # Ventilatie start
+  - platform: state
+    entity_id: !input presence_sensor
+    to: "on"
+    for:
+      minutes: !input fan_presence_delay
+
+action:
+  - choose:
+
+      # ===== HANDMATIGE DIMMER → OVERRIDE =====
+      - conditions:
+          - condition: trigger
+            id: brightness
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_light_override
+
+      # ===== AANWEZIG → LICHT AAN (ALS GEEN OVERRIDE) =====
+      - conditions:
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "on"
+          - condition: state
+            entity_id: !input manual_light_override
+            state: "off"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: time
+                    after: !input day_start
+                    before: !input evening_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_day
+
+              - conditions:
+                  - condition: time
+                    after: !input evening_start
+                    before: !input night_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_evening
+
+              - conditions:
+                  - condition: or
+                    conditions:
+                      - condition: time
+                        after: !input night_start
+                      - condition: time
+                        before: !input day_start
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: !input brightness_night
+
+      # ===== GEEN AANWEZIG → LICHT UIT + RESET OVERRIDE =====
+      - conditions:
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "off"
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_target
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_light_override
+
+      # ===== VENTILATIE AAN =====
+      - conditions:
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "on"
+          - condition: state
+            entity_id: !input manual_fan_override
+            state: "off"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input fan_switch
+
+      # ===== VENTILATIE UIT MET NALOOP =====
+      - conditions:
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "off"
+          - condition: state
+            entity_id: !input manual_fan_override
+            state: "off"
+        sequence:
+          - delay:
+              minutes: !input fan_run_on
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
