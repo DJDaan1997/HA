@@ -63,14 +63,16 @@ blueprint:
 
 mode: restart
 
+variables:
+  presence_started_entity: !input presence_started
+  short_stay_minutes: !input short_stay
+
 trigger:
-  # Aanwezigheid start
   - id: presence_on
     platform: state
     entity_id: !input presence_sensor
     to: "on"
 
-  # Aanwezigheid stopt
   - id: presence_off
     platform: state
     entity_id: !input presence_sensor
@@ -84,18 +86,15 @@ action:
           - condition: trigger
             id: presence_on
         sequence:
-          # Tijdstip opslaan
           - service: input_datetime.set_datetime
             target:
               entity_id: !input presence_started
             data:
               datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
-          # Wacht start_delay
           - delay:
               minutes: !input start_delay
 
-          # Als nog aanwezig → ventilatie aan
           - condition: state
             entity_id: !input presence_sensor
             state: "on"
@@ -109,17 +108,16 @@ action:
           - condition: trigger
             id: presence_off
         sequence:
-          # Bereken verblijfsduur
           - variables:
               stay_minutes: >
                 {{ (as_timestamp(now()) -
-                   as_timestamp(states(!input presence_started))) / 60 }}
+                    as_timestamp(states(presence_started_entity))) / 60 }}
 
           - choose:
               # KORT VERBLIJF
               - conditions:
                   - condition: template
-                    value_template: "{{ stay_minutes < !input short_stay }}"
+                    value_template: "{{ stay_minutes < short_stay_minutes }}"
                 sequence:
                   - delay:
                       minutes: !input run_after_short
@@ -127,7 +125,7 @@ action:
               # LANG VERBLIJF
               - conditions:
                   - condition: template
-                    value_template: "{{ stay_minutes >= !input short_stay }}"
+                    value_template: "{{ stay_minutes >= short_stay_minutes }}"
                 sequence:
                   - delay:
                       minutes: !input run_after_long
