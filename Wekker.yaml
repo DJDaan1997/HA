@@ -1,0 +1,182 @@
+blueprint:
+  name: Wekker automatisering (Android, multi-persoon, dag/nacht)
+  description: >
+    Reageert op Android-wekker(s) via de Home Assistant Companion App.
+    Ondersteunt meerdere personen, aparte logica voor ochtend (donker) en
+    middag/nachtdiensten, met veel configureerbare acties.
+
+  domain: automation
+  input:
+    # ---- ALGEMEEN ----
+    person:
+      name: Persoon
+      description: Voor wie is deze instantie? (Alleen voor naamgeving/logica, niet technisch verplicht)
+      selector:
+        text:
+
+    alarm_entity:
+      name: Wekker-entiteit
+      description: >
+        Entiteit die aangeeft dat de wekker AFGAAT.
+        Meestal een binary_sensor of sensor van de Android Companion App.
+        Kies bij voorkeur de entiteit die verandert op het moment dat het alarm afgaat
+        (bijv. binary_sensor.phone_alarm).
+      selector:
+        entity: {}
+
+    alarm_state_on:
+      name: Wekker 'aan' waarde
+      description: >
+        In welke state komt de wekker-entiteit te staan als het alarm daadwerkelijk AFGAAT?
+        Vaak is dit "on" (bij binary_sensor) of een bepaalde time/waarde.
+        Default = "on".
+      default: "on"
+      selector:
+        text: {}
+
+    # ---- OCHTENDPROFIEL ----
+    morning_enabled:
+      name: Ochtendprofiel inschakelen
+      default: true
+      selector:
+        boolean: {}
+
+    morning_time_start:
+      name: Ochtend - vroegste tijd
+      description: Alleen reageren als de wekker tussen deze tijden afgaat (start).
+      default: "04:00:00"
+      selector:
+        time: {}
+
+    morning_time_end:
+      name: Ochtend - laatste tijd
+      description: Alleen reageren als de wekker tussen deze tijden afgaat (eind).
+      default: "11:00:00"
+      selector:
+        time: {}
+
+    morning_only_when_dark:
+      name: Alleen ochtend-actie uitvoeren als het nog donker is
+      description: Check tegen sun.sun (below_horizon).
+      default: true
+      selector:
+        boolean: {}
+
+    morning_actions:
+      name: Acties bij ochtendwekker
+      description: >
+        Wat moet er gebeuren als de wekker van deze persoon in de OCHTEND afgaat
+        en aan de voorwaarden is voldaan (tijd/donker).
+      default: []
+      selector:
+        action: {}
+
+    # ---- MIDDAG / NACHTDIENST PROFIEL ----
+    day_enabled:
+      name: Middag/Nachtdienst profiel inschakelen
+      default: true
+      selector:
+        boolean: {}
+
+    day_time_start:
+      name: Middag/Nachtdienst - vroegste tijd
+      description: Bijv. wakker worden in de middag na nachtdienst.
+      default: "11:00:00"
+      selector:
+        time: {}
+
+    day_time_end:
+      name: Middag/Nachtdienst - laatste tijd
+      description: Tot welke tijd geldt dit profiel.
+      default: "18:00:00"
+      selector:
+        time: {}
+
+    day_actions:
+      name: Acties bij middag/nachtdienst-wekker
+      description: >
+        Wat moet er gebeuren als je (bijv. na nachtdienst) wakker wordt in de middag.
+      default: []
+      selector:
+        action: {}
+
+    # ---- FALLBACK / OVERIGE ----
+    other_enabled:
+      name: Overig profiel inschakelen (buiten bovenstaande tijdvakken)
+      default: false
+      selector:
+        boolean: {}
+
+    other_actions:
+      name: Acties bij overige wekkers
+      description: >
+        Wat moet er gebeuren als de wekker buiten de ochtend- of middag/nachtdienst-tijd valt.
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input alarm_entity
+
+variables:
+  person_name: !input person
+  alarm_entity: !input alarm_entity
+  alarm_state_on: !input alarm_state_on
+
+  morning_enabled: !input morning_enabled
+  morning_time_start: !input morning_time_start
+  morning_time_end: !input morning_time_end
+  morning_only_when_dark: !input morning_only_when_dark
+
+  day_enabled: !input day_enabled
+  day_time_start: !input day_time_start
+  day_time_end: !input day_time_end
+
+  other_enabled: !input other_enabled
+
+condition:
+  - condition: template
+    value_template: >
+      {{ trigger.to_state.state == alarm_state_on }}
+
+action:
+  - variables:
+      now_time: "{{ now().time() }}"
+      sun_state: "{{ states('sun.sun') }}"
+
+      in_morning_window: >
+        {{ morning_enabled
+           and morning_time_start <= now_time <= morning_time_end }}
+
+      in_day_window: >
+        {{ day_enabled
+           and day_time_start <= now_time <= day_time_end }}
+
+      is_dark: >
+        {{ sun_state == 'below_horizon' }}
+
+  - choose:
+      # ---- OCHTENDPROFIEL ----
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ in_morning_window and (not morning_only_when_dark or is_dark) }}
+        sequence: !input morning_actions
+
+      # ---- MIDDAG / NACHTDIENST PROFIEL ----
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ in_day_window and (not in_morning_window) }}
+        sequence: !input day_actions
+
+      # ---- OVERIGE ----
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ other_enabled and (not in_morning_window) and (not in_day_window) }}
+        sequence: !input other_actions
